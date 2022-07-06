@@ -32,3 +32,4 @@ func min(a, b int) int {
 - 最值：Math.MaxInt16。。。
 - 范围 for 循环：`for k, v := range wordDict`
 
+- strings.Count(str, "0")
