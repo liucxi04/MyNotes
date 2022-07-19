@@ -1,3 +1,29 @@
+# Effective C++
+
+## 第一章 让自己习惯 C++
+
+### 条款 01 ：视 C++ 为一个语言联邦
+
+> C++ 高效编程守则视情况而变化，取决于你使用 C++ 的哪部分
+
+- 面向过程、面向对象、泛型、函数式、模板元编程
+- C：预处理器、内置数据类型、数组、指针等
+- 面向对象的 C++：构造函数、析构函数、封装、继承、多态
+- 模板的C++：
+- STL：容器、迭代器、算法、函数对象
+
+### 条款 02 ：尽量以 const、enum、inline 替换 #define
+
+> 对于单纯常量，最好以 const 对象或者 enums 替换 #define
+>
+> 对于形似函数的宏，最好改用 inline 函数替换 #define
+
+- 以编译器代替预处理器，因为 #define 不被视作语言的一部分
+
+
+
+
+
 ## 第二章 构造、析构、赋值运算
 
 ### 条款 05 ：了解 C++ 默默编写并调用哪些函数
@@ -49,3 +75,96 @@
 - 析构函数吐出异常会导致程序过早结束或产生未定义的行为
 - 避免异常逃离可以有强迫结束程序和吞下异常两种选择，或者重新设计接口，使用户有机会对可能出现的问题做出反应
 - 如果某个操作可能在失败时抛出异常，而又存在某种需要必须处理该异常，那么这个异常必须来自析构函数以外的某个函数
+
+### 条款 09 ：绝不在构造和析构过程中调用虚函数
+
+> 在基类构造和析构期间不要调用虚函数，因为这类调用从不下降至派生类
+
+- 在基类构造期间，虚函数不是虚函数
+- 在派生类对象的基类构造期间，对象的类型是基类而不是派生类（虚函数、typeid、dunamic_cast 都会将对象看作基类）
+- 一旦派生类析构函数开始执行，对象内的派生成分便呈现未定义值，进入基类析构函数后对象就成为一个基类对象
+- 要确保构造函数和析构函数内没有调用虚函数，构造函数和析构函数调用的函数也不能调用虚函数
+- 令派生类将必要的构造 信息向上传递至基类构造函数来弥补虚函数无法在基类向下调用的遗憾
+
+### 条款 10 ：令 operator= 返回一个 reference to *this
+
+> 令赋值运算符返回一个 reference to *this
+
+- 实现连锁赋值
+- 所有赋值相关运算都要遵守（=、+= ...）
+
+### 条款 11 ：在 operator= 中处理自我赋值
+
+> 确保当对象自我赋值时 operator= 有良好的行为。其中技术包括：比较来源对象和目的对象的地址，精心周到的语句顺序，以及 copy-and-swap
+>
+> 确定任何函数如果操作一个以上的对象，而其中多个对象是同一个对象时，其行为仍然正确
+
+- 错误：delete 不仅删除了 *this 的 bitmap (数据成员)，同时也删除了 rhs 的 bitmap，返回了一个指针指向的是被删除的对象    ---->    不具备自我赋值安全性，不具备异常安全性
+
+```c++
+Widget &Widget::operator= (const Widgte &rhs) {
+    delete pb;
+    pb = new Widget(rhs.pb);
+    return *this;
+}
+```
+
+- 证同测试 - 比较来源对象和目的对象的地址    ---->    不具备异常安全性(new 或者 pb 的拷贝构造出错)
+
+```c++
+// 在开始加上
+if (this == &rhs) return *this;
+```
+
+- 精心周到的语句顺序
+
+```c++
+Widget &Widget::operator= (const Widgte &rhs) {
+    Bitmap *pOrig = pb;
+    pb = new Widget(rhs.pb);
+    delete pOrig;
+    return *this;
+}
+```
+
+- copy-and-swap （条款 29）
+
+```c++
+Widget &Widget::operator= (const Widgte &rhs) {
+    Widget temp(rhs);
+    swap(temp);			// 条款 29
+    return *this;
+}
+// 以下：牺牲可读性，可以提升效率
+Widget &Widget::operator= (Widgte rhs) {  // pass by value 构造了副本，
+    swap(rhs);		
+    return *this;
+}
+```
+
+### 条款 12 ：复制对象时勿忘其每个成分
+
+> 拷贝函数应该确保复制对象内的所有成员变量以及所有基类成分
+>
+> 不要尝试以某个拷贝函数实现另一个拷贝函数。应该将共同机能放进第三个函数中，并由两个拷贝函数共同调用
+
+- 自己实现的拷贝构造和拷贝赋值即使执行了局部拷贝，编译器也不会报错
+- 未拷贝基类成分时：拷贝构造函数中的基类成分使用使用默认构造函数构造，拷贝赋值运算符中的基类成分使用原来的值
+- 具体实现
+
+```c++
+PriorityCustomer::PriorityCustomer (const PriorityCustomer &rhs) 
+	: Customer(rhs)				// 调用基类拷贝构造函数
+    , priority(rhs.priority){
+    ...
+}
+PriorityCustomer &PriorityCustomer::operator= (const PriorityCustomer &rhs) {
+    Customer::operator=(rhs);    // 调用基类拷贝赋值运算符
+    priority = rhs.priority;
+    ...
+    return *this;
+}
+```
+
+- 令拷贝赋值运算符调用拷贝构造函数是不合理的。试图构造一个以及存在的对象
+- 令拷贝构造函数调用拷贝赋值运算符同意无意义。对尚未构造好的对象赋值
