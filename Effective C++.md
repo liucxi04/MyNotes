@@ -20,7 +20,44 @@
 
 - 以编译器代替预处理器，因为 #define 不被视作语言的一部分
 
+- 常量
+  - 常量指针：const int myAge = 19; int * const age = &myAge;  顶层 const
+  - 指向常量的指针：const char * name;  底层 const
 
+- 类专属常量
+
+```c++
+// 为了将常量的作用域限制于类内，必须让它成为类的一个成员；而为确保此常量至多只有一份实体，必须让它成为一个 static 成员
+ class GamePlayer {
+     private:
+     	static const int NumTurns = 5;	// 常量声明式，而非定义式
+     	int scores[NumTurns];			// 使用该常量
+ }
+// 对于一个类专属静态整数类型，只要不取地址，可以不提供定义式
+// 以下为定义式，在类中已经获得初始值，在定义时不可以再设初值
+const int GamePalyer::NumTurns;
+```
+
+- 无法利用 #define 创建一个类专属常量，因为 #define 不重视作用域
+- the enum hack - 一个属于枚举类型的数值可权充 int 被使用
+
+```c++
+ class GamePlayer {
+     private:
+     	enum { NumTurns = 5 };
+     	int scores[NumTurns];			
+ }
+// enum hack 的行为某方面像 #define 而不像 const
+// 取一个 const 的地址是合法的，取一个 #define 或者 enum 的地址不合法
+```
+
+- template inline 函数可以获得宏函数带来的效率以及一般函数的所有可预料行为和类型安全性
+
+### 条款 03 ：尽可能使用 const
+
+
+
+### 条款04 ：确定对象被使用前已先被初始化
 
 
 
@@ -168,3 +205,75 @@ PriorityCustomer &PriorityCustomer::operator= (const PriorityCustomer &rhs) {
 
 - 令拷贝赋值运算符调用拷贝构造函数是不合理的。试图构造一个以及存在的对象
 - 令拷贝构造函数调用拷贝赋值运算符同意无意义。对尚未构造好的对象赋值
+
+## 第三章 资源管理
+
+### 条款 13 ：以对象管理资源
+
+> 为防止资源泄露，请使用 RAII 管理对象，它们在构造函数中获得资源并在析构函数中释放资源。
+>
+> 被经常使用的 RAII 类是 shared_ptr 和 unique_ptr，前者通常是较佳选择，因为其拷贝行为比较直观。若选择 unique_ptr，std::move 会使得被复制一方为空。
+
+- C++ 常使用的资源：动态分配内存、文件描述符、互斥锁、数据库连接、socket
+- 关键思想
+  - 获得资源后立刻放进管理对象内    ---->    资源取得时机便是初始化时机（RAII）
+  - 管理对象运用析构函数确保资源被释放
+- 在动态分配而得的数组身上使用 shared_ptr 等智能指针是个馊主意，因为有 vector、string 等容器是为更好的选择
+
+```c++
+std::shared_ptr<int> isp(new int[1024]);    // shared_ptr 在内部做 delete 动作，而不是delete[]，编译不会报错，但是会产生未定义行为
+```
+
+### 条款 14 ：在资源管理类中小心拷贝行为
+
+> 复制 RAII 对象必须一并复制它所管理的资源，所以资源的拷贝行为决定 RAII 对象的拷贝行为
+>
+> 普遍而常见的 RAII 类拷贝行为是：禁用拷贝、引用计数
+
+- 禁用拷贝：private成员、Uncopyable 类、=delete
+- 引用计数：
+- 复制：深拷贝
+- 转移底部资源的在所有权：unique_ptr、std::move()
+
+### 条款 15 ：在资源管理类中提供对原始资源的访问
+
+> APIs 往往要求访问原始资源，所以每一个 RAII 类应该提供一个取得其所管理的资源的办法
+>
+> 对原始资源的访问可能经由显示转换或隐式转换，一般而言显示转换比较安全，但隐式转换对客户比较方便。
+
+- 显示转换
+  - shared_ptr 等智能指针的 get 成员函数
+  - 重载指针取值操作符（operator->、operator*）
+- 隐式转换
+  - 重载 operator()
+
+### 条款  16 ：成对使用 new 和 delete 时要采用相同形式
+
+> 如果你在 new 表达式中使用 []，必须在相应的 delete 表达式中也使用 []。如果你在 new 表达式中不使用 []，一定不要在相应的 delete 表达式中使用 []。
+
+### 条款 17 ：以独立语句将 new 创建的对象置入智能指针
+
+> 以独立语句将 new 创建的对象置入智能指针。如果不这样做，一旦异常被抛出，有可能导致难以觉察的内存泄露。
+
+```c++
+int priority();
+void process(std::shared_ptr<Widget> pw, int priority);
+
+process(new Widget, priority());// 错误，shared_ptr 构造函数是 explicit，无法进行隐式转换
+process(std::shared_ptr<Widget>(new Widget), priority());//正确，但是可能资源泄露
+// 三个操作：执行 new Widget、调用 priority()、调用 std::shared_ptr 构造函数
+// 三个的执行顺序不确定，可能是 1、2、3。如果对 priority() 的调用出错，则 new Widget 
+// 返回的指针会泄露
+```
+
+- 编译器对语句内的各项操作有重新排列的自由，跨语句各项操作没有
+
+- 在资源被创建和资源被转换为资源管理对象两个时间节点间可能发生异常干扰
+
+```c++
+std::shared_ptr<Widget> pw(new Widget);
+process(pw, priority());
+```
+
+## 第四章 设计与声明
+
